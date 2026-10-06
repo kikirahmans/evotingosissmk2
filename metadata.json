@@ -1,0 +1,6 @@
+{
+  "name": "E-Voting OSIS SMKN 2 Gorontalo",
+  "description": "Aplikasi E-Voting Pemilihan Ketua & Wakil Ketua OSIS SMK Negeri 2 Gorontalo. Dilengkapi bilik suara digital mobile, integrasi Google Spreadsheet realtime, sistem sekali pilih anti-manipulasi, dan dashboard hasil pemilihan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
