@@ -22,6 +22,8 @@ import { Candidate, Voter } from '../types';
 import { PaslonModal } from './PaslonModal';
 import { Watermark } from './Watermark';
 import { getDriveImageUrl, getDriveThumbnailFallback } from '../utils/driveUrl';
+import { localAuthLogin, localCastVote } from '../services/storageAdapter';
+import { INITIAL_VOTERS } from '../data/initialVoters';
 
 interface BilikSuaraProps {
   candidates: Candidate[];
@@ -60,13 +62,20 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
   // Fetch sample voters for quick picker
   useEffect(() => {
     fetch('/api/voters?status=not_voted')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error('Not available');
+        return res.json();
+      })
       .then((data) => {
-        if (data.voters) {
+        if (data && data.voters && data.voters.length > 0) {
           setSampleVoters(data.voters.slice(0, 30));
+        } else {
+          setSampleVoters(INITIAL_VOTERS.slice(0, 30));
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setSampleVoters(INITIAL_VOTERS.slice(0, 30));
+      });
   }, [step]);
 
   // Handle countdown on receipt screen
@@ -98,27 +107,43 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
         body: JSON.stringify({ identifier: identifier.trim() }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (data.alreadyVoted) {
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentVoter(data.voter);
+        setStep('verified');
+        setLoading(false);
+        return;
+      } else {
+        const data = await response.json().catch(() => null);
+        if (data && data.alreadyVoted) {
           setCurrentVoter(data.voter);
           setStep('locked');
           setErrorMessage(data.message);
-        } else {
-          setErrorMessage(data.message || 'Gagal masuk. Periksa kembali NISN atau Token Anda.');
+          setLoading(false);
+          return;
+        } else if (data && data.message && response.status !== 404) {
+          setErrorMessage(data.message);
+          setLoading(false);
+          return;
         }
-        setLoading(false);
-        return;
       }
-
-      setCurrentVoter(data.voter);
-      setStep('verified');
-      setLoading(false);
     } catch (err: any) {
-      setErrorMessage('Terjadi kesalahan koneksi ke server bilik suara. Silakan coba lagi.');
-      setLoading(false);
+      // Server offline / static host fallback
     }
+
+    // Static Host Fallback (GitHub Pages)
+    const localResult = localAuthLogin(identifier.trim());
+    if (localResult.success && localResult.voter) {
+      setCurrentVoter(localResult.voter);
+      setStep('verified');
+    } else if (localResult.alreadyVoted) {
+      setCurrentVoter(localResult.voter || null);
+      setStep('locked');
+      setErrorMessage(localResult.message || 'Hak suara sudah digunakan.');
+    } else {
+      setErrorMessage(localResult.message || 'NISN / Token tidak terdaftar dalam DPT.');
+    }
+    setLoading(false);
   };
 
   // Student Vote Confirmation & Submit
@@ -138,15 +163,43 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
         }),
       });
 
-      const data = await response.json();
+      if (response.ok) {
+        const data = await response.json();
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#6366f1', '#10b981', '#f59e0b', '#3b82f6'],
+        });
 
-      if (!response.ok) {
-        setErrorMessage(data.message || 'Gagal merekam suara.');
+        setReceiptData({
+          ballotCode: data.ballotCode,
+          votedAt: data.votedAt,
+          voterNama: data.voterNama,
+          voterRombel: data.voterRombel,
+          candidateChosen: data.candidateChosen,
+        });
+
+        setCountdown(8);
+        setStep('receipt');
         setLoading(false);
+        onVoteCast();
         return;
+      } else {
+        const data = await response.json().catch(() => null);
+        if (data && data.message && response.status !== 404) {
+          setErrorMessage(data.message);
+          setLoading(false);
+          return;
+        }
       }
+    } catch (err) {
+      // Server offline / static host fallback
+    }
 
-      // Trigger Celebration Confetti!
+    // Static Host Fallback (GitHub Pages)
+    const localVoteResult = localCastVote(currentVoter.nisn, selectedCandidate.id);
+    if (localVoteResult.success && localVoteResult.ballotCode && localVoteResult.candidateChosen) {
       confetti({
         particleCount: 100,
         spread: 70,
@@ -155,19 +208,19 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
       });
 
       setReceiptData({
-        ballotCode: data.ballotCode,
-        votedAt: data.votedAt,
-        voterNama: data.voterNama,
-        voterRombel: data.voterRombel,
-        candidateChosen: data.candidateChosen,
+        ballotCode: localVoteResult.ballotCode,
+        votedAt: localVoteResult.votedAt || '',
+        voterNama: localVoteResult.voterNama || '',
+        voterRombel: localVoteResult.voterRombel || '',
+        candidateChosen: localVoteResult.candidateChosen,
       });
 
       setCountdown(8);
       setStep('receipt');
       setLoading(false);
       onVoteCast();
-    } catch (err) {
-      setErrorMessage('Terjadi gangguan saat merekam suara. Hubungi pengawas TPS.');
+    } else {
+      setErrorMessage(localVoteResult.message || 'Gagal merekam suara.');
       setLoading(false);
     }
   };

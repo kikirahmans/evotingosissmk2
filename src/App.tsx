@@ -7,6 +7,7 @@ import { PanitiaLockGate } from './components/PanitiaLockGate';
 import { Watermark } from './components/Watermark';
 import { Candidate, ElectionOverview } from './types';
 import { INITIAL_CANDIDATES } from './data/initialCandidates';
+import { getLocalOverview } from './services/storageAdapter';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'bilik' | 'dashboard' | 'panitia'>('bilik');
@@ -49,11 +50,14 @@ export default function App() {
         const data = await res.json();
         if (data.candidates && Array.isArray(data.candidates)) {
           setCandidates(data.candidates);
+          return;
         }
       }
     } catch {
-      // Fallback to initial candidates
+      // Static host fallback
     }
+    const local = getLocalOverview();
+    setCandidates(local.candidates);
   }, []);
 
   // Fetch Overview and Results
@@ -66,10 +70,14 @@ export default function App() {
         if (data.candidates) {
           setCandidates(data.candidates);
         }
+        return;
       }
     } catch {
-      // Ignore transient errors
+      // Static host fallback
     }
+    const local = getLocalOverview();
+    setOverview(local);
+    setCandidates(local.candidates);
   }, []);
 
   // Initial Load
