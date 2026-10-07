@@ -7,11 +7,8 @@ import {
   AlertTriangle,
   UserCheck,
   Vote,
-  Sparkles,
   LogOut,
   Clock,
-  QrCode,
-  Search,
   Lock,
   ChevronRight,
   Info,
@@ -23,7 +20,6 @@ import { PaslonModal } from './PaslonModal';
 import { Watermark } from './Watermark';
 import { getDriveImageUrl, getDriveThumbnailFallback } from '../utils/driveUrl';
 import { localAuthLogin, localCastVote } from '../services/storageAdapter';
-import { INITIAL_VOTERS } from '../data/initialVoters';
 
 interface BilikSuaraProps {
   candidates: Candidate[];
@@ -53,30 +49,6 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
 
   // Auto logout timer after voting receipt
   const [countdown, setCountdown] = useState(8);
-
-  // Quick picker drawer/modal for testing and quick student search
-  const [showDemoPicker, setShowDemoPicker] = useState(false);
-  const [demoSearchQuery, setDemoSearchQuery] = useState('');
-  const [sampleVoters, setSampleVoters] = useState<Voter[]>([]);
-
-  // Fetch sample voters for quick picker
-  useEffect(() => {
-    fetch('/api/voters?status=not_voted')
-      .then((res) => {
-        if (!res.ok) throw new Error('Not available');
-        return res.json();
-      })
-      .then((data) => {
-        if (data && data.voters && data.voters.length > 0) {
-          setSampleVoters(data.voters.slice(0, 30));
-        } else {
-          setSampleVoters(INITIAL_VOTERS.slice(0, 30));
-        }
-      })
-      .catch(() => {
-        setSampleVoters(INITIAL_VOTERS.slice(0, 30));
-      });
-  }, [step]);
 
   // Handle countdown on receipt screen
   useEffect(() => {
@@ -326,21 +298,6 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
               )}
             </button>
           </form>
-
-          {/* Quick Demo Picker / Siswa List Shortcut */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={() => setShowDemoPicker(true)}
-              className="w-full py-2 px-3 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 text-slate-400 hover:text-indigo-300 text-xs flex items-center justify-between transition"
-            >
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Pilih Cepat Siswa DPT (Mode Evaluasi / Demo)</span>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
 
           {/* Guarantee Badges */}
           <div className="grid grid-cols-3 gap-2 pt-2 text-center text-[10px] text-slate-400">
@@ -751,85 +708,6 @@ export const BilikSuara: React.FC<BilikSuaraProps> = ({
           setShowConfirmModal(true);
         }}
       />
-
-      {/* QUICK DEMO PICKER MODAL (Evaluator / Panitia shortcut) */}
-      {showDemoPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-4 shadow-2xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div>
-                <h4 className="font-bold text-sm text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span>Pilih Cepat Siswa (294 Siswa DPT)</span>
-                </h4>
-                <p className="text-[11px] text-slate-400">Klik salah satu siswa untuk langsung mengisi NISN</p>
-              </div>
-              <button
-                onClick={() => setShowDemoPicker(false)}
-                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 bg-slate-800 rounded"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="py-2.5">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Cari nama siswa atau kelas..."
-                  value={demoSearchQuery}
-                  onChange={(e) => setDemoSearchQuery(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none"
-                />
-                <Search className="w-3.5 h-3.5 text-slate-500 absolute right-3 top-2.5" />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
-              {sampleVoters
-                .filter(
-                  (v) =>
-                    v.nama.toLowerCase().includes(demoSearchQuery.toLowerCase()) ||
-                    v.rombel.toLowerCase().includes(demoSearchQuery.toLowerCase()) ||
-                    v.nisn.includes(demoSearchQuery)
-                )
-                .slice(0, 25)
-                .map((v) => (
-                  <button
-                    key={v.nisn}
-                    type="button"
-                    onClick={() => {
-                      setIdentifier(v.nisn);
-                      setShowDemoPicker(false);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-slate-950/70 hover:bg-indigo-950/50 hover:border-indigo-500/40 border border-slate-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <div>
-                      <div className="font-bold text-xs text-white group-hover:text-indigo-300">
-                        {v.nama}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-mono">
-                        {v.rombel} • NISN: {v.nisn}
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-slate-800 group-hover:bg-indigo-600 text-slate-300 group-hover:text-white">
-                      PILIH
-                    </span>
-                  </button>
-                ))}
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 text-center">
-              <button
-                onClick={() => setShowDemoPicker(false)}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
