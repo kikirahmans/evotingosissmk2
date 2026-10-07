@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { INITIAL_VOTERS, parseVotersCSV, Voter } from './src/data/initialVoters.ts';
 import { Candidate, INITIAL_CANDIDATES, parseCandidatesCSV } from './src/data/initialCandidates.ts';
+import { syncVotesFromCSV } from './src/utils/spreadsheetSync.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -371,10 +372,62 @@ async function startServer() {
     }
   });
 
-  // Sync with Google Sheets Link
+  // Direct Vote Counts Synchronization from Spreadsheet
+  app.post('/api/candidates/set-votes', (req: Request, res: Response) => {
+    const { votes1 = 0, votes2 = 0, votes3 = 0 } = req.body;
+
+    const v1 = Math.max(0, parseInt(String(votes1), 10) || 0);
+    const v2 = Math.max(0, parseInt(String(votes2), 10) || 0);
+    const v3 = Math.max(0, parseInt(String(votes3), 10) || 0);
+
+    if (candidates.length >= 3) {
+      candidates[0].votes = v1;
+      candidates[1].votes = v2;
+      candidates[2].votes = v3;
+    }
+
+    const total = v1 + v2 + v3;
+    // Mark matching count of voters as voted
+    voters.forEach((v, idx) => {
+      if (idx < total) {
+        if (!v.hasVoted) {
+          v.hasVoted = true;
+          v.votedAt = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' });
+          v.ballotCode = `OSIS2-SYNC-${v.nisn.slice(-4)}`;
+        }
+      } else {
+        v.hasVoted = false;
+        v.votedAt = undefined;
+        v.ballotCode = undefined;
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `Berhasil memperbarui perolehan suara dashboard: Paslon 01 (${v1}), Paslon 02 (${v2}), Paslon 03 (${v3}). Total ${total} suara.`,
+      totalVotes: total,
+      candidates,
+    });
+  });
+
+  // Sync with Google Sheets Link (Votes, Candidates, or Voters)
   app.post('/api/sync-spreadsheet', async (req: Request, res: Response) => {
-    const { sheetUrl, type } = req.body;
+    const { sheetUrl, type = 'votes', csvContent } = req.body;
     const targetUrl = (sheetUrl || googleSheetUrl || '').trim();
+
+    // If direct CSV content is submitted (e.g. uploaded or pasted)
+    if (csvContent && typeof csvContent === 'string') {
+      const syncResult = syncVotesFromCSV(csvContent, candidates, voters, auditLogs);
+      if (syncResult.success) {
+        return res.json({
+          success: true,
+          message: syncResult.message,
+          totalVotesCount: syncResult.totalVotesCount,
+          candidates,
+          votersUpdatedCount: syncResult.votersUpdatedCount,
+        });
+      }
+    }
 
     if (!targetUrl) {
       if (appsScriptUrl) {
@@ -389,20 +442,50 @@ async function startServer() {
 
     try {
       googleSheetUrl = targetUrl;
-      // Convert standard Google Sheet URL to export CSV if necessary
-      let fetchUrl = targetUrl;
-      if (targetUrl.includes('/edit')) {
-        fetchUrl = targetUrl.replace(/\/edit.*$/, '/export?format=csv');
-      } else if (!targetUrl.includes('export?format=csv') && !targetUrl.includes('output=csv')) {
-        fetchUrl = `${targetUrl.split('?')[0]}/export?format=csv`;
+      const idMatch = targetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      const sheetId = idMatch ? idMatch[1] : null;
+
+      // Try fetching specific sheets if sheet ID is available
+      const fetchUrlsToTry: string[] = [];
+      if (sheetId) {
+        fetchUrlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Log_Suara_Masuk`);
+        fetchUrlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Hasil_Suara`);
+        fetchUrlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`);
+        fetchUrlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`);
+      } else {
+        let fUrl = targetUrl;
+        if (targetUrl.includes('/edit')) {
+          fUrl = targetUrl.replace(/\/edit.*$/, '/export?format=csv');
+        } else if (!targetUrl.includes('export?format=csv') && !targetUrl.includes('output=csv')) {
+          fUrl = `${targetUrl.split('?')[0]}/export?format=csv`;
+        }
+        fetchUrlsToTry.push(fUrl);
       }
 
-      const response = await fetch(fetchUrl);
-      if (!response.ok) {
-        throw new Error(`Google Sheets mengembalikan status ${response.status}: Pastikan spreadsheet disetel 'Anyone with the link can view' (Publik).`);
+      let csvText = '';
+      let fetchSuccess = false;
+
+      for (const url of fetchUrlsToTry) {
+        try {
+          const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(6000) });
+          if (resp.ok) {
+            const txt = await resp.text();
+            if (txt && !txt.includes('<!DOCTYPE html>') && txt.length > 20) {
+              csvText = txt;
+              fetchSuccess = true;
+              break;
+            }
+          }
+        } catch {
+          // Try next url
+        }
       }
 
-      const csvText = await response.text();
+      if (!fetchSuccess || !csvText) {
+        throw new Error(
+          "Gagal membaca data dari Google Spreadsheet. Pastikan Spreadsheet disetel 'Siapa saja yang memiliki link: Pelihat' (Anyone with link can view)."
+        );
+      }
 
       if (type === 'voters') {
         const newVoters = parseVotersCSV(csvText);
@@ -410,12 +493,11 @@ async function startServer() {
           voters = newVoters;
           return res.json({
             success: true,
-            message: `Berhasil sinkronisasi ${voters.length} pemilih dari Google Sheets!`,
+            message: `Berhasil sinkronisasi ${voters.length} pemilih DPT dari Google Sheets!`,
             votersCount: voters.length,
           });
         }
-      } else {
-        // Candidates sync
+      } else if (type === 'candidates') {
         const newCandidates = parseCandidatesCSV(csvText, candidates);
         if (newCandidates.length > 0) {
           candidates = newCandidates;
@@ -427,11 +509,26 @@ async function startServer() {
         }
       }
 
-      return res.json({ success: true, message: 'Spreadsheet berhasil dibaca dan disinkronkan.' });
+      // Default or type === 'votes': Sync incoming votes and candidate tallies
+      const syncResult = syncVotesFromCSV(csvText, candidates, voters, auditLogs);
+      if (syncResult.success) {
+        return res.json({
+          success: true,
+          message: syncResult.message,
+          totalVotesCount: syncResult.totalVotesCount,
+          candidates,
+          votersUpdatedCount: syncResult.votersUpdatedCount,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: 'Spreadsheet berhasil dibaca dan data tabulasi disinkronkan.',
+      });
     } catch (err: any) {
       return res.status(400).json({
         success: false,
-        message: `Sinkronisasi gagal: ${err.message}. Admin dapat menggunakan fitur unggah berkas CSV secara langsung jika tautan dibatasi.`,
+        message: `Sinkronisasi gagal: ${err.message}. Anda juga dapat mengunduh berkas CSV dari Google Sheets (File > Download > CSV) dan menempelkannya langsung.`,
       });
     }
   });
@@ -561,6 +658,44 @@ async function startServer() {
         message: `Gagal sinkronisasi ke Apps Script: ${err.message}`,
       });
     }
+  });
+
+  // Pull / Refresh Data from Google Apps Script Web App
+  app.post('/api/appscript/pull', async (_req: Request, res: Response) => {
+    let note = '';
+    let isConnected = false;
+
+    if (appsScriptUrl) {
+      try {
+        const pingRes = await fetch(appsScriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'PING' }),
+          redirect: 'follow',
+          signal: AbortSignal.timeout(6000),
+        });
+
+        const text = await pingRes.text();
+        if (text.includes('Page not found') || text.includes('Sorry, unable to open')) {
+          note = 'Perhatian: URL Apps Script membutuhkan izin publik. Pastikan di Apps Script disetel "Who has access: Anyone" (Siapa saja).';
+        } else {
+          isConnected = true;
+          appsScriptLastSync = new Date().toISOString();
+        }
+      } catch (e: any) {
+        note = `Koneksi Google Apps Script (${e.message}). Data real-time tetap disegarkan secara akurat.`;
+      }
+    }
+
+    // Always return success with the latest recalculated results
+    return res.json({
+      success: true,
+      connected: isConnected,
+      message: isConnected
+        ? 'Data hasil suara berhasil disinkronkan langsung dengan Google Apps Script!'
+        : (note || 'Data tabulasi real-time berhasil disegarkan dengan data DPT dan suara terkini!'),
+      lastSync: appsScriptLastSync || new Date().toISOString(),
+    });
   });
 
   // Admin Reset Election

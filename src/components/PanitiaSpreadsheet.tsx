@@ -57,11 +57,36 @@ export const GOOGLE_APPS_SCRIPT_TEMPLATE = `/**
  * 9. Salin 'URL Aplikasi Web' (akhiran /exec) dan tempelkan ke form Aplikasi E-Voting!
  */
 
+function doGet(e) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet();
+    var logSheet = sheet.getSheetByName("Log_Suara_Masuk");
+    var hasilSheet = sheet.getSheetByName("Hasil_Suara");
+    
+    var result = {
+      status: "SUCCESS",
+      timestamp: new Date().toISOString(),
+      watermark: "kikybahsoan",
+      logCount: logSheet ? Math.max(0, logSheet.getLastRow() - 1) : 0,
+      log: logSheet ? logSheet.getDataRange().getValues() : [],
+      hasil: hasilSheet ? hasilSheet.getDataRange().getValues() : []
+    };
+
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "ERROR", error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function doPost(e) {
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet();
     var data = JSON.parse(e.postData.contents);
     var action = data.action;
+
+    if (action === "GET_DATA" || action === "GET_RESULTS") {
+      return doGet(e);
+    }
 
     if (action === "VOTE_RECORDED") {
       // 1. Catat ke sheet Log_Suara_Masuk

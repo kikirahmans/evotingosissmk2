@@ -1,6 +1,7 @@
 import { Voter, Candidate, ElectionOverview } from '../types';
 import { INITIAL_VOTERS } from '../data/initialVoters';
 import { INITIAL_CANDIDATES } from '../data/initialCandidates';
+import { syncVotesFromCSV } from '../utils/spreadsheetSync';
 
 const DEFAULT_APPS_SCRIPT_URL =
   'https://script.google.com/macros/s/AKfycbw1GCnJlUTkrKJFObrxA6OKyiaQoFG6epF86M_nWGJE1a1KHMAzViwGuwST-QYRnWIP/exec';
@@ -317,4 +318,47 @@ export function localResetElection() {
   saveLocalVoters(voters);
   saveLocalCandidates(candidates);
   saveLocalAuditLogs([]);
+}
+
+export function syncVotesLocalFromCSV(csvText: string) {
+  const voters = getLocalVoters();
+  const candidates = getLocalCandidates();
+  const auditLogs = getLocalAuditLogs();
+
+  const result = syncVotesFromCSV(csvText, candidates, voters, auditLogs);
+  if (result.success) {
+    saveLocalVoters(voters);
+    saveLocalCandidates(candidates);
+    saveLocalAuditLogs(auditLogs);
+  }
+  return result;
+}
+
+export function setLocalCandidateVotes(v1: number, v2: number, v3: number) {
+  const voters = getLocalVoters();
+  const candidates = getLocalCandidates();
+
+  if (candidates.length >= 3) {
+    candidates[0].votes = v1;
+    candidates[1].votes = v2;
+    candidates[2].votes = v3;
+  }
+
+  const total = v1 + v2 + v3;
+  voters.forEach((v, idx) => {
+    if (idx < total) {
+      if (!v.hasVoted) {
+        v.hasVoted = true;
+        v.votedAt = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Makassar' });
+        v.ballotCode = `OSIS2-SYNC-${v.nisn.slice(-4)}`;
+      }
+    } else {
+      v.hasVoted = false;
+      v.votedAt = undefined;
+      v.ballotCode = undefined;
+    }
+  });
+
+  saveLocalVoters(voters);
+  saveLocalCandidates(candidates);
 }
