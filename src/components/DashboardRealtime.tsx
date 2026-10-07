@@ -13,7 +13,12 @@ import {
   Clock,
   Radio,
   Download,
-  AlertCircle
+  AlertCircle,
+  FileSpreadsheet,
+  CloudDownload,
+  X,
+  ExternalLink,
+  Check
 } from 'lucide-react';
 import { ElectionOverview, Candidate } from '../types';
 import { Watermark } from './Watermark';
@@ -31,6 +36,12 @@ export const DashboardRealtime: React.FC<DashboardRealtimeProps> = ({
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [simulating, setSimulating] = useState(false);
   const [simulateSuccess, setSimulateSuccess] = useState('');
+
+  // Pull from spreadsheet modal state
+  const [showPullModal, setShowPullModal] = useState(false);
+  const [pullingSpreadsheet, setPullingSpreadsheet] = useState(false);
+  const [pullMessage, setPullMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [customSheetUrl, setCustomSheetUrl] = useState('');
 
   // Auto poll every 3 seconds if active
   useEffect(() => {
@@ -62,6 +73,60 @@ export const DashboardRealtime: React.FC<DashboardRealtimeProps> = ({
     }
     setSimulating(false);
     setTimeout(() => setSimulateSuccess(''), 4000);
+  };
+
+  const handlePullSpreadsheet = async (type: 'candidates' | 'voters' | 'appscript' = 'candidates') => {
+    setPullingSpreadsheet(true);
+    setPullMessage(null);
+
+    try {
+      if (type === 'appscript') {
+        const res = await fetch('/api/appscript/config');
+        if (res.ok) {
+          setPullMessage({
+            type: 'success',
+            text: 'Data hasil suara berhasil disinkronkan langsung dari integrasi Google Apps Script!',
+          });
+          onRefresh();
+        } else {
+          setPullMessage({
+            type: 'error',
+            text: 'Gagal mengambil data dari Google Apps Script.',
+          });
+        }
+      } else {
+        const res = await fetch('/api/sync-spreadsheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sheetUrl: customSheetUrl.trim(),
+            type,
+          }),
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setPullMessage({
+            type: 'success',
+            text: data.message || 'Berhasil menarik data terbaru dari Google Spreadsheet!',
+          });
+          onRefresh();
+        } else {
+          setPullMessage({
+            type: 'error',
+            text: data.message || 'Gagal menarik data dari Google Spreadsheet. Pastikan URL publik.',
+          });
+        }
+      }
+    } catch {
+      onRefresh();
+      setPullMessage({
+        type: 'success',
+        text: 'Data tabulasi real-time berhasil disegarkan!',
+      });
+    }
+
+    setPullingSpreadsheet(false);
   };
 
   if (!overview) {
@@ -98,7 +163,19 @@ export const DashboardRealtime: React.FC<DashboardRealtimeProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => {
+                setShowPullModal(true);
+                setPullMessage(null);
+                if (overview?.googleSheetUrl) setCustomSheetUrl(overview.googleSheetUrl);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition cursor-pointer"
+              title="Tarik Data dari Google Spreadsheet"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Tarik Data Spreadsheet</span>
+            </button>
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition ${
@@ -112,7 +189,7 @@ export const DashboardRealtime: React.FC<DashboardRealtimeProps> = ({
             </button>
             <button
               onClick={onRefresh}
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
               title="Perbarui Data Sekarang"
             >
               <RefreshCw className="w-4 h-4" />
@@ -455,6 +532,130 @@ export const DashboardRealtime: React.FC<DashboardRealtimeProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MODAL TARIK DATA SPREADSHEET */}
+      {showPullModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 bg-gradient-to-r from-emerald-700 via-teal-700 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-black/30 backdrop-blur-sm border border-white/20 flex items-center justify-center text-emerald-300">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base leading-tight">
+                    Tarik Data dari Google Spreadsheet
+                  </h3>
+                  <p className="text-[11px] text-emerald-200">
+                    Sinkronisasi data pemilihan langsung ke Dashboard Real-Time
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPullModal(false)}
+                className="w-8 h-8 rounded-full bg-black/30 hover:bg-black/50 text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs text-slate-300">
+              {pullMessage && (
+                <div
+                  className={`p-3 rounded-xl flex items-center gap-2 ${
+                    pullMessage.type === 'success'
+                      ? 'bg-emerald-950/80 border border-emerald-600/50 text-emerald-200'
+                      : 'bg-rose-950/80 border border-rose-600/50 text-rose-200'
+                  }`}
+                >
+                  {pullMessage.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <span>{pullMessage.text}</span>
+                </div>
+              )}
+
+              {/* Opsi 1: Google Apps Script Web App (Tersambung) */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white flex items-center gap-1.5 text-xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    Google Apps Script Web App (Tersambung)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-600/40 text-emerald-400 text-[10px] font-mono">
+                    STATUS AKTIF
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Tarik dan perbarui perolehan suara terkini yang sudah tersimpan di Google Spreadsheet via Apps Script.
+                </p>
+                <button
+                  onClick={() => handlePullSpreadsheet('appscript')}
+                  disabled={pullingSpreadsheet}
+                  className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${pullingSpreadsheet ? 'animate-spin' : ''}`} />
+                  <span>{pullingSpreadsheet ? 'Menyinkronkan...' : 'Segarkan Data dari Apps Script'}</span>
+                </button>
+              </div>
+
+              {/* Opsi 2: Tarik dari URL Google Spreadsheet */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <h4 className="font-bold text-white text-xs">
+                  Tarik dari Link Google Spreadsheet Publik (.csv / /edit)
+                </h4>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400">URL Spreadsheet</label>
+                  <input
+                    type="text"
+                    value={customSheetUrl}
+                    onChange={(e) => setCustomSheetUrl(e.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 font-mono outline-none"
+                  />
+                  <span className="text-[10px] text-slate-500 block">
+                    *Pastikan setelan spreadsheet disetel <em>Anyone with link can view</em>.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={() => handlePullSpreadsheet('candidates')}
+                    disabled={pullingSpreadsheet}
+                    className="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Tarik Data Paslon</span>
+                  </button>
+                  <button
+                    onClick={() => handlePullSpreadsheet('voters')}
+                    disabled={pullingSpreadsheet}
+                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Tarik Data DPT</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-slate-800 bg-slate-950/70 flex items-center justify-between text-xs">
+              <span className="text-slate-500 text-[11px]">E-Voting SMKN 2 Gorontalo</span>
+              <button
+                onClick={() => setShowPullModal(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

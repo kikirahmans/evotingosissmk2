@@ -60,4 +60,6 @@ export interface ElectionOverview {
   discrepancy: number;
   auditLogs: AuditLog[];
   lastUpdated: string;
+  googleSheetUrl?: string;
+  appsScriptUrl?: string;
 }

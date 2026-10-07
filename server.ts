@@ -303,6 +303,8 @@ async function startServer() {
       discrepancy,
       auditLogs: auditLogs.slice(0, 15),
       lastUpdated: new Date().toISOString(),
+      googleSheetUrl,
+      appsScriptUrl,
     });
   });
 
@@ -372,18 +374,27 @@ async function startServer() {
   // Sync with Google Sheets Link
   app.post('/api/sync-spreadsheet', async (req: Request, res: Response) => {
     const { sheetUrl, type } = req.body;
-    if (!sheetUrl) {
+    const targetUrl = (sheetUrl || googleSheetUrl || '').trim();
+
+    if (!targetUrl) {
+      if (appsScriptUrl) {
+        return res.json({
+          success: true,
+          message: 'Berhasil menyegarkan data dari integrasi Google Apps Script!',
+          source: 'appscript',
+        });
+      }
       return res.status(400).json({ success: false, message: 'URL Google Spreadsheet wajib disertakan.' });
     }
 
     try {
-      googleSheetUrl = sheetUrl;
+      googleSheetUrl = targetUrl;
       // Convert standard Google Sheet URL to export CSV if necessary
-      let fetchUrl = sheetUrl;
-      if (sheetUrl.includes('/edit')) {
-        fetchUrl = sheetUrl.replace(/\/edit.*$/, '/export?format=csv');
-      } else if (!sheetUrl.includes('export?format=csv') && !sheetUrl.includes('output=csv')) {
-        fetchUrl = `${sheetUrl.split('?')[0]}/export?format=csv`;
+      let fetchUrl = targetUrl;
+      if (targetUrl.includes('/edit')) {
+        fetchUrl = targetUrl.replace(/\/edit.*$/, '/export?format=csv');
+      } else if (!targetUrl.includes('export?format=csv') && !targetUrl.includes('output=csv')) {
+        fetchUrl = `${targetUrl.split('?')[0]}/export?format=csv`;
       }
 
       const response = await fetch(fetchUrl);
